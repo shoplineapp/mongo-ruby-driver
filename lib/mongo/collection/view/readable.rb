@@ -126,26 +126,38 @@ module Mongo
         # @return [ Integer ] The document count.
         #
         # @since 2.0.0
-        def count(opts = {})
-          cmd = { :count => collection.name, :query => filter }
-          cmd[:skip] = opts[:skip] if opts[:skip]
-          cmd[:hint] = opts[:hint] if opts[:hint]
-          cmd[:limit] = opts[:limit] if opts[:limit]
-          cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
-          cmd[:readConcern] = collection.read_concern if collection.read_concern
-          preference = ServerSelector.get(opts[:read] || read)
-          read_with_retry do
-            server = preference.select_server(cluster, false)
-            apply_collation!(cmd, server, opts)
-            Operation::Commands::Command.new({
-                                               :selector => cmd,
-                                               :db_name => database.name,
-                                               :options => { :limit => -1 },
-                                               :read => preference,
-                                             }).execute(server).n.to_i
+        # def count(opts = {})
+        #   cmd = { :count => collection.name, :query => filter }
+        #   cmd[:skip] = opts[:skip] if opts[:skip]
+        #   cmd[:hint] = opts[:hint] if opts[:hint]
+        #   cmd[:limit] = opts[:limit] if opts[:limit]
+        #   cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
+        #   cmd[:readConcern] = collection.read_concern if collection.read_concern
+        #   preference = ServerSelector.get(opts[:read] || read)
+        #   read_with_retry do
+        #     server = preference.select_server(cluster, false)
+        #     apply_collation!(cmd, server, opts)
+        #     Operation::Commands::Command.new({
+        #                                        :selector => cmd,
+        #                                        :db_name => database.name,
+        #                                        :options => { :limit => -1 },
+        #                                        :read => preference,
+        #                                      }).execute(server).n.to_i
 
-          end
+        #   end
+        # end
+
+        # Reference to the fix https://github.com/mongodb/mongo-ruby-driver/pull/960/files
+        def count_documents(opts = {})
+          pipeline = [:'$match' => filter]
+          pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
+          pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
+          pipeline << { :'$group' => { _id: nil, n: { :'$sum' => 1 } } }
+
+          opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+          (aggregate(pipeline, opts).first || {})['n'].to_i
         end
+        alias :count :count_documents
 
         # Get a list of distinct values for a specific field.
         #
@@ -163,25 +175,38 @@ module Mongo
         # @return [ Array<Object> ] The list of distinct values.
         #
         # @since 2.0.0
-        def distinct(field_name, opts = {})
-          cmd = { :distinct => collection.name,
-                  :key => field_name.to_s,
-                  :query => filter }
-          cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
-          cmd[:readConcern] = collection.read_concern if collection.read_concern
-          preference = ServerSelector.get(opts[:read] || read)
-          read_with_retry do
-            server = preference.select_server(cluster, false)
-            apply_collation!(cmd, server, opts)
-            Operation::Commands::Command.new({
-                                               :selector => cmd,
-                                               :db_name => database.name,
-                                               :options => { :limit => -1 },
-                                               :read => preference
-                                             }).execute(server).first['values']
+        # def distinct(field_name, opts = {})
+        #   cmd = { :distinct => collection.name,
+        #           :key => field_name.to_s,
+        #           :query => filter }
+        #   cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
+        #   cmd[:readConcern] = collection.read_concern if collection.read_concern
+        #   preference = ServerSelector.get(opts[:read] || read)
+        #   read_with_retry do
+        #     server = preference.select_server(cluster, false)
+        #     apply_collation!(cmd, server, opts)
+        #     Operation::Commands::Command.new({
+        #                                        :selector => cmd,
+        #                                        :db_name => database.name,
+        #                                        :options => { :limit => -1 },
+        #                                        :read => preference
+        #                                      }).execute(server).first['values']
 
-          end
+        #   end
+        # end
+
+        # Reference to count_documents and re-implemented aggregation to get distinct field values
+        def distinct_documents(field_name, opts = {})
+          pipeline = [:'$match' => filter]
+          pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
+          pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
+          pipeline << { :'$group' => { _id: "$#{field_name}" } }
+          pipeline << { :'$sort' => {_id: 1} }
+
+          opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+          (aggregate(pipeline, opts).to_a || []).map { |v| v['_id'] }.flatten
         end
+        alias :distinct :distinct_documents
 
         # The index that MongoDB will be forced to use for the query.
         #
