@@ -154,8 +154,13 @@ module Mongo
           pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
           pipeline << { :'$group' => { _id: nil, n: { :'$sum' => 1 } } }
 
-          opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
-          (aggregate(pipeline, opts).first || {})['n'].to_i
+          preference = ServerSelector.get(opts[:read] || read)
+          read_with_retry do
+            server = preference.select_server(cluster, false)
+            apply_collation!(opts, server, opts)
+            opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+            (aggregate(pipeline, opts).first || {})['n'].to_i
+          end
         end
         alias :count :count_documents
 
@@ -197,14 +202,21 @@ module Mongo
 
         # Reference to count_documents and re-implemented aggregation to get distinct field values
         def distinct_documents(field_name, opts = {})
-          pipeline = [:'$match' => filter]
+          return [] if field_name.nil?
+
+          pipeline = [:'$match' => prepare_distinct_filter(filter, field_name)]
           pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
           pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
           pipeline << { :'$group' => { _id: "$#{field_name}" } }
-          pipeline << { :'$sort' => {_id: 1} }
+          pipeline << { :'$sort' => { _id: -1 } }
 
-          opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
-          (aggregate(pipeline, opts).to_a || []).map { |v| v['_id'] }.flatten
+          preference = ServerSelector.get(opts[:read] || read)
+          read_with_retry do
+            server = preference.select_server(cluster, false)
+            apply_collation!(opts, server, opts)
+            opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+            (aggregate(pipeline, opts).to_a || []).map { |v| v['_id'] }.flatten
+          end
         end
         alias :distinct :distinct_documents
 
@@ -514,6 +526,24 @@ module Mongo
 
         def validate_doc!(doc)
           raise Error::InvalidDocument.new unless doc.respond_to?(:keys)
+        end
+
+        def prepare_distinct_filter(filter = {}, field_name)
+          filter.dup.tap do |aggregation_filter|
+            field_name = field_name.to_s
+            if aggregation_filter[field_name]
+              if aggregation_filter[field_name].is_a?(Hash)
+                aggregation_filter[field_name][:'$exists'] = true
+              else
+                aggregation_filter[field_name] = {
+                  :'$eq' => aggregation_filter[field_name],
+                  :'$exists' => true
+                }
+              end
+            else
+              aggregation_filter.merge!({ field_name => { :'$exists' => true } })
+            end
+          end
         end
       end
     end

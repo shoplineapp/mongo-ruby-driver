@@ -3,16 +3,16 @@ language: ruby
 sudo: false
 
 rvm:
-  - 1.9.3
-  - 2.0.0
-  - 2.1.10
-  - 2.2.7
-  - 2.3.4
+  # - 1.9.3
+  # - 2.0.0
+  # - 2.1.10
+  # - 2.2.7
+  # - 2.3.4
   - 2.4.1
-  - ruby-head
-  - jruby-19mode
-  - jruby-9.1.12.0
-  - jruby-head
+  # - ruby-head
+  # - jruby-19mode
+  # - jruby-9.1.12.0
+  # - jruby-head
 
 jdk:
   - oraclejdk7
@@ -26,10 +26,10 @@ env:
     - CI="travis"
     - JRUBY_OPTS="--server -J-Xms512m -J-Xmx1024m"
   matrix:
-    - MONGODB=2.4.14
-    - MONGODB=2.6.12
-    - MONGODB=3.0.12
-    - MONGODB=3.2.11
+    # - MONGODB=2.4.14
+    # - MONGODB=2.6.12
+    # - MONGODB=3.0.12
+    # - MONGODB=3.2.11
     - MONGODB=3.4.1
 
 before_script:
