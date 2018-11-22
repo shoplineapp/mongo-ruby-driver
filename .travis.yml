@@ -49,6 +49,7 @@ branches:
     - master
     - 1.x-stable
     - 2.3-stable
+    - feature/count-distinct-aggregation
 
 matrix:
   allow_failures:
