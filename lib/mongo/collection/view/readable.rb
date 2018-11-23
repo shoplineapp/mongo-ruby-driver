@@ -532,11 +532,12 @@ module Mongo
           filter.dup.tap do |aggregation_filter|
             field_name = field_name.to_s
             if aggregation_filter[field_name]
-              if aggregation_filter[field_name].is_a?(Hash)
+              if aggregation_filter[field_name].is_a? Hash
                 aggregation_filter[field_name][:'$exists'] = true
               else
+                matching_query = aggregation_filter[field_name].is_a?(Regexp) ? '$regex' : '$eq'
                 aggregation_filter[field_name] = {
-                  :'$eq' => aggregation_filter[field_name],
+                  matching_query.to_sym => aggregation_filter[field_name],
                   :'$exists' => true
                 }
               end

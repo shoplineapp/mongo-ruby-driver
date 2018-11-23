@@ -614,6 +614,22 @@ describe Mongo::Collection::View::Readable do
         end
       end
 
+      context 'when selector includes regex in the field' do
+
+        let(:selector) do
+          { field: /^test$/ }
+        end
+
+        let(:distinct) do
+          view.distinct('field')
+        end
+
+        it 'returns the distinct values' do
+          expect(distinct).to eq([ 'test' ])
+        end
+
+      end
+
       context 'when the field is nil' do
 
         let(:distinct) do
