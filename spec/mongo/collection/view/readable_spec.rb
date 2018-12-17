@@ -630,6 +630,21 @@ describe Mongo::Collection::View::Readable do
 
       end
 
+      context 'when the field is an array' do
+
+        let(:documents) do
+          (1..3).map{ |i| { field: 'test', tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+        end
+
+        let(:distinct) do
+          view.distinct(:tags)
+        end
+
+        it 'returns the distinct values' do
+          expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
+        end
+      end
+
       context 'when the field is nil' do
 
         let(:distinct) do
@@ -682,6 +697,21 @@ describe Mongo::Collection::View::Readable do
 
         it 'returns the distinct values' do
           expect(distinct.sort).to eq([ 'test1', 'test2', 'test3' ])
+        end
+      end
+
+      context 'when the field is an array' do
+
+        let(:documents) do
+          (1..3).map{ |i| { tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+        end
+
+        let(:distinct) do
+          view.distinct(:tags)
+        end
+
+        it 'returns the distinct values' do
+          expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
         end
       end
 

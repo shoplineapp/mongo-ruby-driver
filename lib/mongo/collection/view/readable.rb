@@ -207,6 +207,7 @@ module Mongo
           pipeline = [:'$match' => prepare_distinct_filter(filter, field_name)]
           pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
           pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
+          pipeline << { :'$unwind' => "$#{field_name}" }
           pipeline << { :'$group' => { _id: "$#{field_name}" } }
           pipeline << { :'$sort' => { _id: -1 } }
 

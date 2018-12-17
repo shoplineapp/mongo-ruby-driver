@@ -14,10 +14,10 @@ rvm:
   # - jruby-9.1.12.0
   # - jruby-head
 
-jdk:
-  - oraclejdk7
-  - openjdk7
-  - oraclejdk8
+# jdk:
+#   - oraclejdk9
+#   - openjdk7
+#   - oraclejdk8
 
 install: ruby -S bundle install --without release development
 
