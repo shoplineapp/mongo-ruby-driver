@@ -632,17 +632,48 @@ describe Mongo::Collection::View::Readable do
 
       context 'when the field is an array' do
 
+        [true, false].each do |enabled|
+
+          context "when legacy array distinct aggregation enabled is #{enabled}" do
+
+            let(:legacy_array_distinct_aggregation) { enabled }
+
+            let(:documents) do
+              (1..3).map{ |i| { field: 'test', tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+            end
+
+            let(:distinct) do
+              view.distinct(:tags)
+            end
+
+            it 'returns the distinct values' do
+              expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
+            end
+
+          end
+
+        end
+
+      end
+
+      context 'when the field is an object id' do
+
+        let(:foreign_keys) do
+          (1..3).map { BSON::ObjectId.new }
+        end
+
         let(:documents) do
-          (1..3).map{ |i| { field: 'test', tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+          (1..10).map{ |i| { field: 'test', foreign_id: foreign_keys[i % 3] }}
         end
 
         let(:distinct) do
-          view.distinct(:tags)
+          view.distinct(:foreign_id)
         end
 
         it 'returns the distinct values' do
-          expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
+          expect(distinct.sort).to match_array(foreign_keys)
         end
+
       end
 
       context 'when the field is nil' do
@@ -702,17 +733,48 @@ describe Mongo::Collection::View::Readable do
 
       context 'when the field is an array' do
 
+        [true, false].each do |enabled|
+
+          context "when legacy array distinct aggregation enabled is #{enabled}" do
+
+            let(:legacy_array_distinct_aggregation) { enabled }
+
+            let(:documents) do
+              (1..3).map{ |i| { field: 'test', tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+            end
+
+            let(:distinct) do
+              view.distinct(:tags)
+            end
+
+            it 'returns the distinct values' do
+              expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
+            end
+
+          end
+
+        end
+
+      end
+
+      context 'when the field is an object id' do
+
+        let(:foreign_keys) do
+          (1..3).map { BSON::ObjectId.new }
+        end
+
         let(:documents) do
-          (1..3).map{ |i| { tags: ["test#{i}", "test#{i}", 'duplicated'] }}
+          (1..10).map{ |i| { field: 'test', foreign_id: foreign_keys[i % 3] }}
         end
 
         let(:distinct) do
-          view.distinct(:tags)
+          view.distinct(:foreign_id)
         end
 
         it 'returns the distinct values' do
-          expect(distinct.sort).to eq([ 'duplicated', 'test1', 'test2', 'test3' ])
+          expect(distinct.sort).to match_array(foreign_keys)
         end
+
       end
 
       context 'when the field is nil' do

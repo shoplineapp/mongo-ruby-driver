@@ -207,7 +207,7 @@ module Mongo
           pipeline = [:'$match' => prepare_distinct_filter(filter, field_name)]
           pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
           pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
-          pipeline << { :'$unwind' => "$#{field_name}" }
+          pipeline << { :'$unwind' => "$#{field_name}" } unless legacy_array_distinct_aggregation?
           pipeline << { :'$group' => { _id: "$#{field_name}" } }
           pipeline << { :'$sort' => { _id: -1 } }
 
@@ -216,7 +216,19 @@ module Mongo
             server = preference.select_server(cluster, false)
             apply_collation!(opts, server, opts)
             opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
-            (aggregate(pipeline, opts).to_a || []).map { |v| v['_id'] }.flatten
+            begin
+              (aggregate(pipeline, opts).to_a || [])
+                .map { |v| v['_id'] }
+                .tap { |array| array.uniq! if legacy_array_distinct_aggregation? }
+                .flatten
+            rescue Mongo::Error::OperationFailure => e
+              error = if e.message.include?('Value at end of $unwind field path')
+                        StandardError.new('MongoDB is outdated, consider upgrade to v3.2 or enable environment variable MONGO_LEGACY_ARRAY_UNIQUENESS_DISTINCT')
+                      else
+                        e
+                      end
+              raise error
+            end
           end
         end
         alias :distinct :distinct_documents
@@ -527,6 +539,12 @@ module Mongo
 
         def validate_doc!(doc)
           raise Error::InvalidDocument.new unless doc.respond_to?(:keys)
+        end
+
+        def legacy_array_distinct_aggregation?
+          # FIXME: Remove related logic when all legacy dbs are upgraded to >= 3.2
+          # https://docs.mongodb.com/manual/release-notes/3.2-compatibility/#aggregation-compatibility-changes
+          ENV['MONGO_LEGACY_ARRAY_UNIQUENESS_DISTINCT']
         end
 
         def prepare_distinct_filter(filter = {}, field_name)
