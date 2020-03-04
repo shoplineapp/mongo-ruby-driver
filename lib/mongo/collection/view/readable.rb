@@ -133,32 +133,32 @@ module Mongo
         #     * $where should be replaced with $expr (only works on 3.6+)
         #     * $near should be replaced with $geoWithin with $center
         #     * $nearSphere should be replaced with $geoWithin with $centerSphere
-        def count(opts = {})
-          cmd = { :count => collection.name, :query => filter }
-          cmd[:skip] = opts[:skip] if opts[:skip]
-          cmd[:hint] = opts[:hint] if opts[:hint]
-          cmd[:limit] = opts[:limit] if opts[:limit]
-          if read_concern
-            cmd[:readConcern] = Options::Mapper.transform_values_to_strings(
-              read_concern)
-          end
-          cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
-          Mongo::Lint.validate_underscore_read_preference(opts[:read])
-          read_pref = opts[:read] || read_preference
-          selector = ServerSelector.get(read_pref || server_selector)
-          with_session(opts) do |session|
-            read_with_retry(session, selector) do |server|
-              apply_collation!(cmd, server, opts)
-              Operation::Count.new(
-                                     :selector => cmd,
-                                     :db_name => database.name,
-                                     :options => {:limit => -1},
-                                     :read => read_pref,
-                                     :session => session
-              ).execute(server)
-            end.n.to_i
-          end
-        end
+        # def count(opts = {})
+        #   cmd = { :count => collection.name, :query => filter }
+        #   cmd[:skip] = opts[:skip] if opts[:skip]
+        #   cmd[:hint] = opts[:hint] if opts[:hint]
+        #   cmd[:limit] = opts[:limit] if opts[:limit]
+        #   if read_concern
+        #     cmd[:readConcern] = Options::Mapper.transform_values_to_strings(
+        #       read_concern)
+        #   end
+        #   cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
+        #   Mongo::Lint.validate_underscore_read_preference(opts[:read])
+        #   read_pref = opts[:read] || read_preference
+        #   selector = ServerSelector.get(read_pref || server_selector)
+        #   with_session(opts) do |session|
+        #     read_with_retry(session, selector) do |server|
+        #       apply_collation!(cmd, server, opts)
+        #       Operation::Count.new(
+        #                              :selector => cmd,
+        #                              :db_name => database.name,
+        #                              :options => {:limit => -1},
+        #                              :read => read_pref,
+        #                              :session => session
+        #       ).execute(server)
+        #     end.n.to_i
+        #   end
+        # end
 
         # Get a count of matching documents in the collection.
         #
@@ -183,13 +183,17 @@ module Mongo
           pipeline = [:'$match' => filter]
           pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
           pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
-          pipeline << { :'$group' => { _id: 1, n: { :'$sum' => 1 } } }
+          pipeline << { :'$group' => { _id: nil, n: { :'$sum' => 1 } } }
 
-          opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation, :session].include?(k) }
-          first = aggregate(pipeline, opts).first
-          return 0 unless first
-          first['n'].to_i
+          preference = ServerSelector.get(opts[:read] || read)
+          read_with_retry do
+            server = preference.select_server(cluster, false)
+            apply_collation!(opts, server, opts)
+            opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+            (aggregate(pipeline, opts).first || {})['n'].to_i
+          end
         end
+        alias :count :count_documents
 
         # Gets an estimate of the count of documents in a collection using collection metadata.
         #
@@ -243,34 +247,67 @@ module Mongo
         # @return [ Array<Object> ] The list of distinct values.
         #
         # @since 2.0.0
-        def distinct(field_name, opts = {})
-          if field_name.nil?
-            raise ArgumentError, 'Field name for distinct operation must be not nil'
-          end
-          cmd = { :distinct => collection.name,
-                  :key => field_name.to_s,
-                  :query => filter }
-          cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
-          if read_concern
-            cmd[:readConcern] = Options::Mapper.transform_values_to_strings(
-              read_concern)
-          end
-          Mongo::Lint.validate_underscore_read_preference(opts[:read])
-          read_pref = opts[:read] || read_preference
-          selector = ServerSelector.get(read_pref || server_selector)
-          with_session(opts) do |session|
-            read_with_retry(session, selector) do |server|
-              apply_collation!(cmd, server, opts)
-              Operation::Distinct.new({
-                                        :selector => cmd,
-                                        :db_name => database.name,
-                                        :options => {:limit => -1},
-                                        :read => read_pref,
-                                        :session => session
-                                       }).execute(server)
-            end.first['values']
+        # def distinct(field_name, opts = {})
+        #   if field_name.nil?
+        #     raise ArgumentError, 'Field name for distinct operation must be not nil'
+        #   end
+        #   cmd = { :distinct => collection.name,
+        #           :key => field_name.to_s,
+        #           :query => filter }
+        #   cmd[:maxTimeMS] = opts[:max_time_ms] if opts[:max_time_ms]
+        #   if read_concern
+        #     cmd[:readConcern] = Options::Mapper.transform_values_to_strings(
+        #       read_concern)
+        #   end
+        #   Mongo::Lint.validate_underscore_read_preference(opts[:read])
+        #   read_pref = opts[:read] || read_preference
+        #   selector = ServerSelector.get(read_pref || server_selector)
+        #   with_session(opts) do |session|
+        #     read_with_retry(session, selector) do |server|
+        #       apply_collation!(cmd, server, opts)
+        #       Operation::Distinct.new({
+        #                                 :selector => cmd,
+        #                                 :db_name => database.name,
+        #                                 :options => {:limit => -1},
+        #                                 :read => read_pref,
+        #                                 :session => session
+        #                                }).execute(server)
+        #     end.first['values']
+        #   end
+        # end
+
+        # Reference to count_documents and re-implemented aggregation to get distinct field values
+        def distinct_documents(field_name, opts = {})
+          return [] if field_name.nil?
+
+          pipeline = [:'$match' => prepare_distinct_filter(filter, field_name)]
+          pipeline << { :'$skip' => opts[:skip] } if opts[:skip]
+          pipeline << { :'$limit' => opts[:limit] } if opts[:limit]
+          pipeline << { :'$unwind' => "$#{field_name}" } unless legacy_array_distinct_aggregation?
+          pipeline << { :'$group' => { _id: "$#{field_name}" } }
+          pipeline << { :'$sort' => { _id: -1 } }
+
+          preference = ServerSelector.get(opts[:read] || read)
+          read_with_retry do
+            server = preference.select_server(cluster, false)
+            apply_collation!(opts, server, opts)
+            opts.select! { |k, _| [:hint, :max_time_ms, :read, :collation].include?(k) }
+            begin
+              (aggregate(pipeline, opts).to_a || [])
+                .map { |v| v['_id'] }
+                .tap { |array| array.uniq! if legacy_array_distinct_aggregation? }
+                .flatten
+            rescue Mongo::Error::OperationFailure => e
+              error = if e.message.include?('Value at end of $unwind field path')
+                        StandardError.new('MongoDB is outdated, consider upgrade to v3.2 or enable environment variable MONGO_LEGACY_ARRAY_UNIQUENESS_DISTINCT')
+                      else
+                        e
+                      end
+              raise error
+            end
           end
         end
+        alias :distinct :distinct_documents
 
         # The index that MongoDB will be forced to use for the query.
         #
@@ -624,6 +661,31 @@ module Mongo
 
         def validate_doc!(doc)
           raise Error::InvalidDocument.new unless doc.respond_to?(:keys)
+        end
+
+        def legacy_array_distinct_aggregation?
+          # FIXME: Remove related logic when all legacy dbs are upgraded to >= 3.2
+          # https://docs.mongodb.com/manual/release-notes/3.2-compatibility/#aggregation-compatibility-changes
+          ENV['MONGO_LEGACY_ARRAY_UNIQUENESS_DISTINCT']
+        end
+
+        def prepare_distinct_filter(filter = {}, field_name)
+          filter.dup.tap do |aggregation_filter|
+            field_name = field_name.to_s
+            if aggregation_filter[field_name]
+              if aggregation_filter[field_name].is_a? Hash
+                aggregation_filter[field_name][:'$exists'] = true
+              else
+                matching_query = aggregation_filter[field_name].is_a?(Regexp) ? '$regex' : '$eq'
+                aggregation_filter[field_name] = {
+                  matching_query.to_sym => aggregation_filter[field_name],
+                  :'$exists' => true
+                }
+              end
+            else
+              aggregation_filter.merge!({ field_name => { :'$exists' => true } })
+            end
+          end
         end
       end
     end
